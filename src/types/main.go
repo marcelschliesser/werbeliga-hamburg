@@ -12,3 +12,15 @@ type MatchResult struct {
 	DateTime  time.Time
 	MatchDay  int8
 }
+
+type Season struct {
+	Name     string
+	Id       string
+	Selected bool
+}
+
+type Match struct {
+	Name     string
+	Id       string
+	Selected bool
+}

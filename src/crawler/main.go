@@ -11,7 +11,7 @@ import (
 )
 
 func ParseMatchResults(url string) ([]types.MatchResult, error) {
-	formData := "season=24&match=607"
+	formData := "season=23&match=566"
 
 	req, err := http.NewRequest("POST", url, strings.NewReader(formData))
 	if err != nil {
@@ -36,17 +36,20 @@ func ParseMatchResults(url string) ([]types.MatchResult, error) {
 
 	var matches []types.MatchResult
 
-	// Find the table containing match results
-	doc.Find("table").Each(func(i int, table *goquery.Selection) {
+	// Get Match Results
+	doc.Find("table").First().Each(func(i int, table *goquery.Selection) {
 		table.Find("tr").Each(func(j int, row *goquery.Selection) {
-			// Skip header row
-			if j == 0 {
+
+			rows := table.Find("tr")
+			rowCount := rows.Length()
+
+			// Skip header (first) and footer (last) rows
+			if j == 0 || j == rowCount-1 {
 				return
 			}
 
 			var match types.MatchResult
 
-			// Extract data from columns
 			cols := row.Find("td")
 			if cols.Length() >= 4 {
 				timeStr := strings.TrimSpace(cols.Eq(1).Text())
@@ -82,5 +85,35 @@ func ParseMatchResults(url string) ([]types.MatchResult, error) {
 		})
 	})
 
+	// Get Season
+	doc.Find("select[id=season]").Find("option").Each(func(i int, s *goquery.Selection) {
+		se := types.Season{}
+		se.Name = s.Text()
+		if id, ok := s.Attr("value"); ok {
+			se.Id = id
+		}
+		if _, ok := s.Attr("selected"); ok {
+			se.Selected = ok
+		}
+		fmt.Println(i, se)
+	})
+
+	// Get Match
+	doc.Find("select[id=match]").Find("option").Each(func(i int, s *goquery.Selection) {
+		m := types.Match{}
+		m.Name = s.Text()
+
+		if id, ok := s.Attr("value"); ok {
+			m.Id = id
+		}
+
+		if _, ok := s.Attr("selected"); ok {
+			m.Selected = ok
+		}
+		fmt.Println(i, m)
+
+	})
+
 	return matches, nil
+
 }
