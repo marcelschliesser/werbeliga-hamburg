@@ -20,7 +20,7 @@ type Season struct {
 }
 
 type Match struct {
-	Name     string
+	Date     time.Time
 	Id       string
 	Selected bool
 }

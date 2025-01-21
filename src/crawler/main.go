@@ -10,8 +10,24 @@ import (
 	"github.com/marcelschliesser/werbeliga-hamburg/types"
 )
 
+func parseGameDate(g *types.Match, s string) error {
+	// Extract date part by splitting on "-" and trimming spaces
+	parts := strings.Split(s, "-")
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid date format")
+	}
+
+	datePart := strings.TrimSpace(parts[1])
+	t, err := time.Parse("02.01.2006", datePart)
+	if err != nil {
+		return err
+	}
+	g.Date = t
+	return nil
+}
+
 func ParseMatchResults(url string) ([]types.MatchResult, error) {
-	formData := "season=23&match=566"
+	formData := "season=23&match=560"
 
 	req, err := http.NewRequest("POST", url, strings.NewReader(formData))
 	if err != nil {
@@ -101,7 +117,7 @@ func ParseMatchResults(url string) ([]types.MatchResult, error) {
 	// Get Match
 	doc.Find("select[id=match]").Find("option").Each(func(i int, s *goquery.Selection) {
 		m := types.Match{}
-		m.Name = s.Text()
+		parseGameDate(&m, s.Text())
 
 		if id, ok := s.Attr("value"); ok {
 			m.Id = id
