@@ -1,8 +1,12 @@
-package crawler
+package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -10,52 +14,100 @@ import (
 	"github.com/marcelschliesser/werbeliga-hamburg/types"
 )
 
-func parseGameDate(g *types.Match, s string) error {
-	// Extract date part by splitting on "-" and trimming spaces
-	parts := strings.Split(s, "-")
-	if len(parts) != 2 {
-		return fmt.Errorf("invalid date format")
-	}
+const url string = "https://werbeliga.de/de/Spielplan,%20Tabelle%20&%20Torsch%C3%BCtzen"
 
-	datePart := strings.TrimSpace(parts[1])
-	t, err := time.Parse("02.01.2006", datePart)
-	if err != nil {
-		return err
-	}
-	g.Date = t
-	return nil
+type Crawler struct {
+	httpClient http.Client
+	baseUrl    string
 }
 
-func ParseMatchResults(url string) ([]types.MatchResult, error) {
-	formData := "season=23&match=560"
+func main() {
+	firstSeasion := "season=2&match=1"
+	c := NewCrawler(url, 10)
+	doc := c.FetchUrl(firstSeasion)
 
-	req, err := http.NewRequest("POST", url, strings.NewReader(formData))
-	if err != nil {
-		fmt.Printf("Failed to create request: %v\n", err)
-		return nil, err
+	seasons := ReturnSeasons(doc)
+
+	for _, season := range seasons {
+		matchDays := c.ReturnMatchDays(int(season.Id))
+		season.MatchDays = matchDays
+		log.Println(season.Year, len(season.MatchDays))
 	}
 
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	data, err := json.Marshal(seasons)
 	if err != nil {
-		fmt.Printf("Request failed: %v\n", err)
-		return nil, err
+		log.Panicln(err)
 	}
-	defer resp.Body.Close()
+	os.WriteFile("data.json", data, 0644)
 
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse HTML: %v", err)
+}
+
+func NewCrawler(baseUrl string, timeoutSeconds int) *Crawler {
+	return &Crawler{
+		httpClient: http.Client{
+			Timeout: time.Duration(timeoutSeconds) * time.Second,
+		},
+		baseUrl: baseUrl,
 	}
+}
 
+// ReturnSeasons return all Seasons with year and id
+func ReturnSeasons(d *goquery.Document) []*types.Season {
+	var seasons []*types.Season
+	d.Find("select[id=season]").Find("option").Each(func(i int, s *goquery.Selection) {
+		se := &types.Season{}
+
+		yearString := strings.Split(strings.Split(s.Text(), "Saison")[1], "/")[0]
+		year, err := strconv.ParseUint(yearString[1:], 10, 64)
+		if err != nil {
+			fmt.Printf("Failed to parse: %v\n", err)
+			return
+		}
+		se.Year = year
+
+		if id, ok := s.Attr("value"); ok {
+			idunit, err := strconv.ParseUint(id, 10, 64)
+			if err != nil {
+				fmt.Printf("Failed to parse: %v\n", err)
+				return
+			}
+			se.Id = idunit
+		}
+		seasons = append(seasons, se)
+	})
+
+	return seasons
+}
+
+func (c *Crawler) ReturnMatchDays(seasonId int) []types.MatchDay {
+	var matchDays []types.MatchDay
+	doc := c.FetchUrl(fmt.Sprintf("season=%v&match=1", seasonId))
+	doc.Find("select[id=match]").Find("option").Each(func(i int, s *goquery.Selection) {
+		m := types.MatchDay{}
+		parseGameDate(&m, s.Text())
+
+		if id, ok := s.Attr("value"); ok {
+			idunit, err := strconv.ParseUint(id, 10, 64)
+			if err != nil {
+				fmt.Printf("Failed to parse: %v\n", err)
+				return
+			}
+			m.Id = idunit
+		}
+		matchDayDoc := c.FetchUrl(fmt.Sprintf("season=%v&match=%v", seasonId, m.Id))
+		m.MatchResults = ReturnMatchResults(matchDayDoc)
+		matchDays = append(matchDays, m)
+
+	})
+
+	return matchDays
+
+}
+
+func ReturnMatchResults(doc *goquery.Document) []types.MatchResult {
 	var matches []types.MatchResult
-
-	// Get Match Results
 	doc.Find("table").First().Each(func(i int, table *goquery.Selection) {
 		table.Find("tr").Each(func(j int, row *goquery.Selection) {
-
 			rows := table.Find("tr")
 			rowCount := rows.Length()
 
@@ -64,7 +116,7 @@ func ParseMatchResults(url string) ([]types.MatchResult, error) {
 				return
 			}
 
-			var match types.MatchResult
+			match := types.MatchResult{}
 
 			cols := row.Find("td")
 			if cols.Length() >= 4 {
@@ -90,46 +142,53 @@ func ParseMatchResults(url string) ([]types.MatchResult, error) {
 				}
 
 				// Parse date and time
-				// Note: You'll need to combine the date from the header with the time
-				// This is a simplified example
 				if t, err := time.Parse("15:04", timeStr); err == nil {
-					match.DateTime = t
+					match.Time = t
 				}
 
 				matches = append(matches, match)
 			}
 		})
 	})
+	return matches
+}
 
-	// Get Season
-	doc.Find("select[id=season]").Find("option").Each(func(i int, s *goquery.Selection) {
-		se := types.Season{}
-		se.Name = s.Text()
-		if id, ok := s.Attr("value"); ok {
-			se.Id = id
-		}
-		if _, ok := s.Attr("selected"); ok {
-			se.Selected = ok
-		}
-		fmt.Println(i, se)
-	})
+func (c *Crawler) FetchUrl(postPayload string) *goquery.Document {
+	req, err := http.NewRequest("POST", c.baseUrl, strings.NewReader(postPayload))
+	if err != nil {
+		fmt.Printf("Failed to create request: %v\n", err)
+		return nil
+	}
 
-	// Get Match
-	doc.Find("select[id=match]").Find("option").Each(func(i int, s *goquery.Selection) {
-		m := types.Match{}
-		parseGameDate(&m, s.Text())
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-		if id, ok := s.Attr("value"); ok {
-			m.Id = id
-		}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		fmt.Printf("Request failed: %v\n", err)
+		return nil
+	}
+	defer resp.Body.Close()
 
-		if _, ok := s.Attr("selected"); ok {
-			m.Selected = ok
-		}
-		fmt.Println(i, m)
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	if err != nil {
+		fmt.Errorf("failed to parse HTML: %v", err)
+		return nil
+	}
+	return doc
+}
 
-	})
+func parseGameDate(g *types.MatchDay, s string) error {
+	// Extract date part by splitting on "-" and trimming spaces
+	parts := strings.Split(s, "-")
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid date format")
+	}
 
-	return matches, nil
-
+	datePart := strings.TrimSpace(parts[1])
+	t, err := time.Parse("02.01.2006", datePart)
+	if err != nil {
+		return err
+	}
+	g.Date = t
+	return nil
 }
