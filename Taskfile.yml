@@ -6,9 +6,10 @@ vars:
   GREETING: Hello, World!
 
 tasks:
-  default:
+  pp:
+    dir: src/crawler
     cmds:
-      - echo "{{.GREETING}}"
+      - cat data.json | jq .
     silent: true
 
   run_crawler:
