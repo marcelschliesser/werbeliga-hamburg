@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -14,7 +15,7 @@ import (
 	"github.com/marcelschliesser/werbeliga-hamburg/types"
 )
 
-const url string = "https://werbeliga.de/de/Spielplan,%20Tabelle%20&%20Torsch%C3%BCtzen"
+const baseUrl string = "https://werbeliga.de/de/Spielplan,%20Tabelle%20&%20Torsch%C3%BCtzen"
 
 type Crawler struct {
 	httpClient http.Client
@@ -22,14 +23,15 @@ type Crawler struct {
 }
 
 func main() {
-	firstSeasion := "season=2&match=1"
-	c := NewCrawler(url, 10)
-	doc := c.FetchUrl(firstSeasion)
+	c := NewCrawler(baseUrl, 10)
+
+	// Starting Point (Season 2011)
+	doc := c.FetchUrl(2, 1)
 
 	seasons := ReturnSeasons(doc)
 
 	for _, season := range seasons {
-		matchDays := c.ReturnMatchDays(int(season.Id))
+		matchDays := c.ReturnMatchDays(uint8(season.Id))
 		season.MatchDays = matchDays
 		log.Println(season.Year, len(season.MatchDays))
 	}
@@ -79,9 +81,9 @@ func ReturnSeasons(d *goquery.Document) []*types.Season {
 	return seasons
 }
 
-func (c *Crawler) ReturnMatchDays(seasonId int) []types.MatchDay {
+func (c *Crawler) ReturnMatchDays(seasonId uint8) []types.MatchDay {
 	var matchDays []types.MatchDay
-	doc := c.FetchUrl(fmt.Sprintf("season=%v&match=1", seasonId))
+	doc := c.FetchUrl(seasonId, 1)
 	doc.Find("select[id=match]").Find("option").Each(func(i int, s *goquery.Selection) {
 		m := types.MatchDay{}
 		parseGameDate(&m, s.Text())
@@ -92,9 +94,9 @@ func (c *Crawler) ReturnMatchDays(seasonId int) []types.MatchDay {
 				fmt.Printf("Failed to parse: %v\n", err)
 				return
 			}
-			m.Id = idunit
+			m.Id = uint8(idunit)
 		}
-		matchDayDoc := c.FetchUrl(fmt.Sprintf("season=%v&match=%v", seasonId, m.Id))
+		matchDayDoc := c.FetchUrl(seasonId, m.Id)
 		m.MatchResults = ReturnMatchResults(matchDayDoc)
 		matchDays = append(matchDays, m)
 
@@ -153,8 +155,12 @@ func ReturnMatchResults(doc *goquery.Document) []types.MatchResult {
 	return matches
 }
 
-func (c *Crawler) FetchUrl(postPayload string) *goquery.Document {
-	req, err := http.NewRequest("POST", c.baseUrl, strings.NewReader(postPayload))
+func (c *Crawler) FetchUrl(season, match uint8) *goquery.Document {
+	v := url.Values{
+		"season": []string{fmt.Sprintf("%d", season)},
+		"match":  []string{fmt.Sprintf("%d", match)},
+	}
+	req, err := http.NewRequest("POST", c.baseUrl, strings.NewReader(v.Encode()))
 	if err != nil {
 		fmt.Printf("Failed to create request: %v\n", err)
 		return nil

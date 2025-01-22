@@ -11,8 +11,9 @@ tasks:
       - echo "{{.GREETING}}"
     silent: true
 
-  run:
-    dir: src
-    aliases: [r]
+  run_crawler:
+    dir: src/crawler
+    aliases: [rc]
     cmds:
+      - go test
       - go run main.go

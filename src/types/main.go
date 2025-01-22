@@ -11,7 +11,7 @@ type Season struct {
 }
 
 type MatchDay struct {
-	Id           uint64        `json:"id"`
+	Id           uint8         `json:"id"`
 	Date         time.Time     `json:"date"`
 	MatchResults []MatchResult `json:"matchResults,omitempty"`
 }
