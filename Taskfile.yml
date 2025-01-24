@@ -19,5 +19,4 @@ tasks:
     aliases: [rc]
     cmds:
       - go test
-      - go run main.go
-      #- task pp
+      - time go run main.go

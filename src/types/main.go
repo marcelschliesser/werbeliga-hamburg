@@ -8,22 +8,21 @@ type SeasonId uint
 type MatchId uint
 
 type Season struct {
-	Id        SeasonId   `json:"id"`
+	Id        SeasonId   `json:"seasonId"`
 	Year      uint       `json:"year"`
-	MatchDays []MatchDay `json:"matchDays,omitempty"`
+	MatchDays []MatchDay `json:"matchDays"`
 }
 
 type MatchDay struct {
-	Id           MatchId       `json:"id"`
-	Date         time.Time     `json:"date"`
-	MatchResults []MatchResult `json:"matchResults,omitempty"`
+	Id           MatchId `json:"matchId"`
+	MatchResults []Match `json:"matchResults"`
 }
 
-type MatchResult struct {
+type Match struct {
 	HomeTeam  string    `json:"homeTeam"`
 	AwayTeam  string    `json:"awayTeam"`
 	HomeScore uint      `json:"homeScore"`
 	AwayScore uint      `json:"awayScore"`
-	Time      time.Time `json:"time"`
+	DateTime  time.Time `json:"dateTime"`
 	Court     uint      `json:"court"`
 }
