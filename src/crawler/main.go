@@ -26,7 +26,7 @@ func main() {
 
 	seasons := c.fetchAllSeasons()
 
-	c.fetchAllMatchIds(&seasons)
+	c.fetchAllMatches(&seasons)
 
 	// TODO: parallelize requests
 	for i := range seasons {
@@ -45,8 +45,8 @@ func main() {
 	log.Println(len(seasons))
 }
 
-// fetchAllMatchIds will fetch all MatchIds to given SeasonIds
-func (c *Crawler) fetchAllMatchIds(seasons *[]types.Season) {
+// fetchAllMatches will fetch all Match-Informations to given SeasonIds
+func (c *Crawler) fetchAllMatches(seasons *[]types.Season) {
 
 	for i := range *seasons {
 		season := &(*seasons)[i] // TODO: Understand this "Hack" :-D
@@ -59,6 +59,7 @@ func (c *Crawler) fetchAllMatchIds(seasons *[]types.Season) {
 					log.Fatalln(err.Error())
 				}
 				m.Id = types.MatchId(iduint)
+				m.Date = parseGameDate(s.Text())
 				season.MatchDays = append(season.MatchDays, m)
 			}
 		})
@@ -101,31 +102,6 @@ func NewCrawler(baseUrl string, timeoutSeconds int) *Crawler {
 		},
 		baseUrl: baseUrl,
 	}
-}
-
-func (c *Crawler) ReturnMatchDays(seasonId uint) []types.MatchDay {
-	var matchDays []types.MatchDay
-	doc := c.FetchUrl(seasonId, 1)
-	doc.Find("select[id=match]").Find("option").Each(func(i int, s *goquery.Selection) {
-		m := types.MatchDay{}
-		parseGameDate(&m, s.Text())
-
-		if id, ok := s.Attr("value"); ok {
-			idunit, err := strconv.ParseUint(id, 10, 64)
-			if err != nil {
-				fmt.Printf("Failed to parse: %v\n", err)
-				return
-			}
-			m.Id = types.MatchId(idunit)
-		}
-		matchDayDoc := c.FetchUrl(seasonId, uint(m.Id))
-		m.MatchResults = ReturnMatchResults(matchDayDoc)
-		matchDays = append(matchDays, m)
-
-	})
-
-	return matchDays
-
 }
 
 func ReturnMatchResults(doc *goquery.Document) []types.Match {
@@ -208,20 +184,14 @@ func (c *Crawler) FetchUrl(season, match uint) *goquery.Document {
 	return doc
 }
 
-func parseGameDate(g *types.MatchDay, s string) error {
-	// Extract date part by splitting on "-" and trimming spaces
+func parseGameDate(s string) time.Time {
 	parts := strings.Split(s, "-")
-	if len(parts) != 2 {
-		return fmt.Errorf("invalid date format")
-	}
-
 	datePart := strings.TrimSpace(parts[1])
 	t, err := time.Parse("02.01.2006", datePart)
 	if err != nil {
-		return err
+		log.Println(err.Error())
 	}
-	log.Println(t)
-	return nil
+	return t
 }
 
 func yearFromString(yearString string) uint {
