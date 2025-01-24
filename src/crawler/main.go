@@ -144,28 +144,31 @@ func ReturnMatchResults(doc *goquery.Document) []types.Match {
 
 			cols := row.Find("td")
 			if cols.Length() >= 4 {
+				courtStr := strings.TrimSpace(cols.Eq(0).Text())
+				courtUint, err := strconv.ParseUint(courtStr, 10, 32)
+				if err != nil {
+					log.Fatalln(err.Error())
+				}
+				match.Court = uint(courtUint)
+
 				timeStr := strings.TrimSpace(cols.Eq(1).Text())
 				matchStr := strings.TrimSpace(cols.Eq(2).Text())
 				resultStr := strings.TrimSpace(cols.Eq(3).Text())
 
-				// Parse teams
 				teams := strings.Split(matchStr, ":")
 				if len(teams) == 2 {
 					match.HomeTeam = strings.TrimSpace(teams[0])
 					match.AwayTeam = strings.TrimSpace(teams[1])
 				}
 
-				// Parse scores if available
 				scores := strings.Split(resultStr, ":")
 				if len(scores) == 2 {
-					// Only parse if it's not "- : -"
 					if scores[0] != "-" && scores[1] != "-" {
 						fmt.Sscanf(scores[0], "%d", &match.HomeScore)
 						fmt.Sscanf(scores[1], "%d", &match.AwayScore)
 					}
 				}
 
-				// Parse date and time
 				if t, err := time.Parse("15:04", timeStr); err == nil {
 					match.DateTime = t
 				}
