@@ -24,71 +24,67 @@ func main() {
 
 	c := NewCrawler(os.Getenv("URL"), 10)
 
-	seasonIds := c.fetchAllSeasonIds()
+	seasons := c.fetchAllSeasons()
 
-	seasonIdMatchIds := c.fetchAllMatchIds(&seasonIds)
-
-	var d []types.MatchResult
+	c.fetchAllMatchIds(&seasons)
 
 	// TODO: parallelize requests
-	for s, ms := range seasonIdMatchIds {
-		for _, m := range ms {
-			doc := c.FetchUrl(uint(s), uint(m))
-			matchResult := ReturnMatchResults(doc)
-			d = append(d, matchResult...)
+	for i := range seasons {
+		for j := range seasons[i].MatchDays {
+			doc := c.FetchUrl(uint(seasons[i].Id), uint(seasons[i].MatchDays[j].Id))
+			res := ReturnMatchResults(doc)
+			seasons[i].MatchDays[j].MatchResults = res
 		}
-
 	}
 
-	data, err := json.Marshal(d)
+	data, err := json.Marshal(seasons)
 	if err != nil {
 		log.Panicln(err)
 	}
 	os.WriteFile("data.json", data, 0644)
-	log.Println(len(d))
+	log.Println(len(seasons))
 }
 
-// fetchAllMatchIds will fetch all MatchIds to a given SeasonId
-func (c *Crawler) fetchAllMatchIds(seasonIds *[]types.SeasonId) map[types.SeasonId][]types.MatchId {
+// fetchAllMatchIds will fetch all MatchIds to given SeasonIds
+func (c *Crawler) fetchAllMatchIds(seasons *[]types.Season) {
 
-	data := make(map[types.SeasonId][]types.MatchId)
-
-	for _, s := range *seasonIds {
-		var m []types.MatchId
-		doc := c.FetchUrl(uint(s), 1)
+	for i := range *seasons {
+		season := &(*seasons)[i] // TODO: Understand this "Hack" :-D
+		doc := c.FetchUrl(uint(season.Id), 1)
 		doc.Find("select[id=match]").Find("option").Each(func(i int, s *goquery.Selection) {
-
+			var m types.MatchDay
 			if id, ok := s.Attr("value"); ok {
 				iduint, err := strconv.ParseUint(id, 10, 16)
 				if err != nil {
 					log.Fatalln(err.Error())
 				}
-				m = append(m, types.MatchId(iduint))
+				m.Id = types.MatchId(iduint)
+				season.MatchDays = append(season.MatchDays, m)
 			}
 		})
-
-		data[s] = m
-
 	}
-	return data
 }
 
-// fetchAllSeasonIds is the starting point and fetch all current season ids
-func (c *Crawler) fetchAllSeasonIds() []types.SeasonId {
+// fetchAllSeasonIds is the starting point and fetch all current seasons
+func (c *Crawler) fetchAllSeasons() []types.Season {
 
 	var firstSeasonId uint = 2
-	var seasons []types.SeasonId
+	var seasons []types.Season
 
 	doc := c.FetchUrl(firstSeasonId, 1)
 
 	doc.Find("select[id=season]").Find("option").Each(func(i int, s *goquery.Selection) {
+
+		var season types.Season
 
 		if id, ok := s.Attr("value"); ok {
 			iduint, err := strconv.ParseUint(id, 10, 16)
 			if err != nil {
 				log.Fatalln(err.Error())
 			}
-			seasons = append(seasons, types.SeasonId(iduint))
+			season.Id = types.SeasonId(iduint)
+			season.Year = yearFromString(s.Text())
+			seasons = append(seasons, season)
 
 		}
 	})
@@ -105,34 +101,6 @@ func NewCrawler(baseUrl string, timeoutSeconds int) *Crawler {
 		},
 		baseUrl: baseUrl,
 	}
-}
-
-// ReturnSeasons return all Seasons with year and id
-func ReturnSeasons(d *goquery.Document) []*types.Season {
-	var seasons []*types.Season
-	d.Find("select[id=season]").Find("option").Each(func(i int, s *goquery.Selection) {
-		se := &types.Season{}
-
-		yearString := strings.Split(strings.Split(s.Text(), "Saison")[1], "/")[0]
-		year, err := strconv.ParseUint(yearString[1:], 10, 64)
-		if err != nil {
-			fmt.Printf("Failed to parse: %v\n", err)
-			return
-		}
-
-		se.Year = uint(year)
-		if id, ok := s.Attr("value"); ok {
-			idunit, err := strconv.ParseUint(id, 10, 64)
-			if err != nil {
-				fmt.Printf("Failed to parse: %v\n", err)
-				return
-			}
-			se.Id = types.SeasonId(idunit)
-		}
-		seasons = append(seasons, se)
-	})
-
-	return seasons
 }
 
 func (c *Crawler) ReturnMatchDays(seasonId uint) []types.MatchDay {
@@ -160,8 +128,8 @@ func (c *Crawler) ReturnMatchDays(seasonId uint) []types.MatchDay {
 
 }
 
-func ReturnMatchResults(doc *goquery.Document) []types.MatchResult {
-	var matches []types.MatchResult
+func ReturnMatchResults(doc *goquery.Document) []types.Match {
+	var matches []types.Match
 	doc.Find("table").First().Each(func(i int, table *goquery.Selection) {
 		table.Find("tr").Each(func(j int, row *goquery.Selection) {
 			rows := table.Find("tr")
@@ -172,7 +140,7 @@ func ReturnMatchResults(doc *goquery.Document) []types.MatchResult {
 				return
 			}
 
-			match := types.MatchResult{}
+			match := types.Match{}
 
 			cols := row.Find("td")
 			if cols.Length() >= 4 {
@@ -199,7 +167,7 @@ func ReturnMatchResults(doc *goquery.Document) []types.MatchResult {
 
 				// Parse date and time
 				if t, err := time.Parse("15:04", timeStr); err == nil {
-					match.Time = t
+					match.DateTime = t
 				}
 
 				matches = append(matches, match)
@@ -249,6 +217,15 @@ func parseGameDate(g *types.MatchDay, s string) error {
 	if err != nil {
 		return err
 	}
-	g.Date = t
+	log.Println(t)
 	return nil
+}
+
+func yearFromString(yearString string) uint {
+	s := strings.Split(strings.Split(yearString, "Saison")[1], "/")[0]
+	year, err := strconv.ParseUint(s[1:], 10, 64)
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
+	return uint(year)
 }
