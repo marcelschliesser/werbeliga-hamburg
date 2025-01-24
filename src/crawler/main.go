@@ -15,12 +15,6 @@ import (
 	"github.com/marcelschliesser/werbeliga-hamburg/types"
 )
 
-const baseUrl string = "https://werbeliga.de/de/Spielplan,%20Tabelle%20&%20Torsch%C3%BCtzen"
-
-// TODO: Move to types.go
-type SeasonId uint
-type MatchId uint
-
 type Crawler struct {
 	httpClient http.Client
 	baseUrl    string
@@ -28,7 +22,7 @@ type Crawler struct {
 
 func main() {
 
-	c := NewCrawler(baseUrl, 10)
+	c := NewCrawler(os.Getenv("URL"), 10)
 
 	seasonIds := c.fetchAllSeasonIds()
 
@@ -55,12 +49,12 @@ func main() {
 }
 
 // fetchAllMatchIds will fetch all MatchIds to a given SeasonId
-func (c *Crawler) fetchAllMatchIds(seasonIds *[]SeasonId) map[SeasonId][]MatchId {
+func (c *Crawler) fetchAllMatchIds(seasonIds *[]types.SeasonId) map[types.SeasonId][]types.MatchId {
 
-	data := make(map[SeasonId][]MatchId)
+	data := make(map[types.SeasonId][]types.MatchId)
 
 	for _, s := range *seasonIds {
-		var m []MatchId
+		var m []types.MatchId
 		doc := c.FetchUrl(uint(s), 1)
 		doc.Find("select[id=match]").Find("option").Each(func(i int, s *goquery.Selection) {
 
@@ -69,7 +63,7 @@ func (c *Crawler) fetchAllMatchIds(seasonIds *[]SeasonId) map[SeasonId][]MatchId
 				if err != nil {
 					log.Fatalln(err.Error())
 				}
-				m = append(m, MatchId(iduint))
+				m = append(m, types.MatchId(iduint))
 			}
 		})
 
@@ -80,10 +74,10 @@ func (c *Crawler) fetchAllMatchIds(seasonIds *[]SeasonId) map[SeasonId][]MatchId
 }
 
 // fetchAllSeasonIds is the starting point and fetch all current season ids
-func (c *Crawler) fetchAllSeasonIds() []SeasonId {
+func (c *Crawler) fetchAllSeasonIds() []types.SeasonId {
 
 	var firstSeasonId uint = 2
-	var seasons []SeasonId
+	var seasons []types.SeasonId
 
 	doc := c.FetchUrl(firstSeasonId, 1)
 
@@ -94,7 +88,7 @@ func (c *Crawler) fetchAllSeasonIds() []SeasonId {
 			if err != nil {
 				log.Fatalln(err.Error())
 			}
-			seasons = append(seasons, SeasonId(iduint))
+			seasons = append(seasons, types.SeasonId(iduint))
 
 		}
 	})
@@ -133,7 +127,7 @@ func ReturnSeasons(d *goquery.Document) []*types.Season {
 				fmt.Printf("Failed to parse: %v\n", err)
 				return
 			}
-			se.Id = uint(idunit)
+			se.Id = types.SeasonId(idunit)
 		}
 		seasons = append(seasons, se)
 	})
@@ -154,9 +148,9 @@ func (c *Crawler) ReturnMatchDays(seasonId uint) []types.MatchDay {
 				fmt.Printf("Failed to parse: %v\n", err)
 				return
 			}
-			m.Id = uint(idunit)
+			m.Id = types.MatchId(idunit)
 		}
-		matchDayDoc := c.FetchUrl(seasonId, m.Id)
+		matchDayDoc := c.FetchUrl(seasonId, uint(m.Id))
 		m.MatchResults = ReturnMatchResults(matchDayDoc)
 		matchDays = append(matchDays, m)
 
@@ -237,7 +231,7 @@ func (c *Crawler) FetchUrl(season, match uint) *goquery.Document {
 
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
-		fmt.Errorf("failed to parse HTML: %v", err)
+		log.Fatalln(err.Error())
 		return nil
 	}
 	return doc

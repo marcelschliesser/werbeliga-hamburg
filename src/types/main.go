@@ -4,14 +4,17 @@ import (
 	"time"
 )
 
+type SeasonId uint
+type MatchId uint
+
 type Season struct {
-	Id        uint       `json:"id"`
+	Id        SeasonId   `json:"id"`
 	Year      uint       `json:"year"`
 	MatchDays []MatchDay `json:"matchDays,omitempty"`
 }
 
 type MatchDay struct {
-	Id           uint          `json:"id"`
+	Id           MatchId       `json:"id"`
 	Date         time.Time     `json:"date"`
 	MatchResults []MatchResult `json:"matchResults,omitempty"`
 }
