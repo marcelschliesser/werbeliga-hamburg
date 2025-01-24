@@ -30,7 +30,7 @@ func main() {
 
 	var d []types.MatchResult
 
-	// Crawl every season and match
+	// TODO: parallelize requests
 	for s, ms := range seasonIdMatchIds {
 		for _, m := range ms {
 			doc := c.FetchUrl(uint(s), uint(m))
