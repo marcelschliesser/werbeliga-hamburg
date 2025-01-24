@@ -2,6 +2,8 @@
 
 version: "3"
 
+dotenv: [".env"]
+
 vars:
   GREETING: Hello, World!
 
@@ -18,4 +20,4 @@ tasks:
     cmds:
       - go test
       - go run main.go
-      - task pp
+      #- task pp

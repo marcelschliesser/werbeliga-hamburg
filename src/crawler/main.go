@@ -15,35 +15,89 @@ import (
 	"github.com/marcelschliesser/werbeliga-hamburg/types"
 )
 
-const baseUrl string = "https://werbeliga.de/de/Spielplan,%20Tabelle%20&%20Torsch%C3%BCtzen"
-
 type Crawler struct {
 	httpClient http.Client
 	baseUrl    string
 }
 
 func main() {
-	c := NewCrawler(baseUrl, 10)
 
-	// Starting Point (Season 2011)
-	doc := c.FetchUrl(2, 1)
+	c := NewCrawler(os.Getenv("URL"), 10)
 
-	seasons := ReturnSeasons(doc)
+	seasonIds := c.fetchAllSeasonIds()
 
-	for _, season := range seasons {
-		matchDays := c.ReturnMatchDays(uint8(season.Id))
-		season.MatchDays = matchDays
-		log.Println(season.Year, len(season.MatchDays))
+	seasonIdMatchIds := c.fetchAllMatchIds(&seasonIds)
+
+	var d []types.MatchResult
+
+	// TODO: parallelize requests
+	for s, ms := range seasonIdMatchIds {
+		for _, m := range ms {
+			doc := c.FetchUrl(uint(s), uint(m))
+			matchResult := ReturnMatchResults(doc)
+			d = append(d, matchResult...)
+		}
+
 	}
 
-	data, err := json.Marshal(seasons)
+	data, err := json.Marshal(d)
 	if err != nil {
 		log.Panicln(err)
 	}
 	os.WriteFile("data.json", data, 0644)
-
+	log.Println(len(d))
 }
 
+// fetchAllMatchIds will fetch all MatchIds to a given SeasonId
+func (c *Crawler) fetchAllMatchIds(seasonIds *[]types.SeasonId) map[types.SeasonId][]types.MatchId {
+
+	data := make(map[types.SeasonId][]types.MatchId)
+
+	for _, s := range *seasonIds {
+		var m []types.MatchId
+		doc := c.FetchUrl(uint(s), 1)
+		doc.Find("select[id=match]").Find("option").Each(func(i int, s *goquery.Selection) {
+
+			if id, ok := s.Attr("value"); ok {
+				iduint, err := strconv.ParseUint(id, 10, 16)
+				if err != nil {
+					log.Fatalln(err.Error())
+				}
+				m = append(m, types.MatchId(iduint))
+			}
+		})
+
+		data[s] = m
+
+	}
+	return data
+}
+
+// fetchAllSeasonIds is the starting point and fetch all current season ids
+func (c *Crawler) fetchAllSeasonIds() []types.SeasonId {
+
+	var firstSeasonId uint = 2
+	var seasons []types.SeasonId
+
+	doc := c.FetchUrl(firstSeasonId, 1)
+
+	doc.Find("select[id=season]").Find("option").Each(func(i int, s *goquery.Selection) {
+
+		if id, ok := s.Attr("value"); ok {
+			iduint, err := strconv.ParseUint(id, 10, 16)
+			if err != nil {
+				log.Fatalln(err.Error())
+			}
+			seasons = append(seasons, types.SeasonId(iduint))
+
+		}
+	})
+
+	return seasons
+}
+
+// NewCrawler initialize a crawler with the werbeliga.de baseUrl
+// and a timeout per request of 10 seconds
 func NewCrawler(baseUrl string, timeoutSeconds int) *Crawler {
 	return &Crawler{
 		httpClient: http.Client{
@@ -65,15 +119,15 @@ func ReturnSeasons(d *goquery.Document) []*types.Season {
 			fmt.Printf("Failed to parse: %v\n", err)
 			return
 		}
-		se.Year = year
 
+		se.Year = uint(year)
 		if id, ok := s.Attr("value"); ok {
 			idunit, err := strconv.ParseUint(id, 10, 64)
 			if err != nil {
 				fmt.Printf("Failed to parse: %v\n", err)
 				return
 			}
-			se.Id = idunit
+			se.Id = types.SeasonId(idunit)
 		}
 		seasons = append(seasons, se)
 	})
@@ -81,7 +135,7 @@ func ReturnSeasons(d *goquery.Document) []*types.Season {
 	return seasons
 }
 
-func (c *Crawler) ReturnMatchDays(seasonId uint8) []types.MatchDay {
+func (c *Crawler) ReturnMatchDays(seasonId uint) []types.MatchDay {
 	var matchDays []types.MatchDay
 	doc := c.FetchUrl(seasonId, 1)
 	doc.Find("select[id=match]").Find("option").Each(func(i int, s *goquery.Selection) {
@@ -94,9 +148,9 @@ func (c *Crawler) ReturnMatchDays(seasonId uint8) []types.MatchDay {
 				fmt.Printf("Failed to parse: %v\n", err)
 				return
 			}
-			m.Id = uint8(idunit)
+			m.Id = types.MatchId(idunit)
 		}
-		matchDayDoc := c.FetchUrl(seasonId, m.Id)
+		matchDayDoc := c.FetchUrl(seasonId, uint(m.Id))
 		m.MatchResults = ReturnMatchResults(matchDayDoc)
 		matchDays = append(matchDays, m)
 
@@ -155,7 +209,7 @@ func ReturnMatchResults(doc *goquery.Document) []types.MatchResult {
 	return matches
 }
 
-func (c *Crawler) FetchUrl(season, match uint8) *goquery.Document {
+func (c *Crawler) FetchUrl(season, match uint) *goquery.Document {
 	v := url.Values{
 		"season": []string{fmt.Sprintf("%d", season)},
 		"match":  []string{fmt.Sprintf("%d", match)},
@@ -177,7 +231,7 @@ func (c *Crawler) FetchUrl(season, match uint8) *goquery.Document {
 
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
-		fmt.Errorf("failed to parse HTML: %v", err)
+		log.Fatalln(err.Error())
 		return nil
 	}
 	return doc

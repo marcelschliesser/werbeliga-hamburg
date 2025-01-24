@@ -4,14 +4,17 @@ import (
 	"time"
 )
 
+type SeasonId uint
+type MatchId uint
+
 type Season struct {
-	Id        uint64     `json:"id"`
-	Year      uint64     `json:"year"`
+	Id        SeasonId   `json:"id"`
+	Year      uint       `json:"year"`
 	MatchDays []MatchDay `json:"matchDays,omitempty"`
 }
 
 type MatchDay struct {
-	Id           uint8         `json:"id"`
+	Id           MatchId       `json:"id"`
 	Date         time.Time     `json:"date"`
 	MatchResults []MatchResult `json:"matchResults,omitempty"`
 }
@@ -19,8 +22,8 @@ type MatchDay struct {
 type MatchResult struct {
 	HomeTeam  string    `json:"homeTeam"`
 	AwayTeam  string    `json:"awayTeam"`
-	HomeScore uint64    `json:"homeScore"`
-	AwayScore uint64    `json:"awayScore"`
+	HomeScore uint      `json:"homeScore"`
+	AwayScore uint      `json:"awayScore"`
 	Time      time.Time `json:"time"`
-	Court     uint64    `json:"court"`
+	Court     uint      `json:"court"`
 }
