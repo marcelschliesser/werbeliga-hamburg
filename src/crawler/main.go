@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/json"
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,12 +13,15 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/marcelschliesser/werbeliga-hamburg/types"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 type Crawler struct {
 	httpClient http.Client
 	baseUrl    string
 }
+
+var DB *sql.DB
 
 func main() {
 
@@ -36,13 +39,65 @@ func main() {
 			seasons[i].MatchDays[j].MatchResults = res
 		}
 	}
+	initDB(&seasons)
 
-	data, err := json.Marshal(seasons)
+}
+
+func initDB(d *[]types.Season) {
+	var err error
+	DB, err = sql.Open("sqlite3", "./app.db") // Open a connection to the SQLite database file named app.db
 	if err != nil {
-		log.Panicln(err)
+		log.Fatal(err) // Log an error and stop the program if the database can't be opened
 	}
-	os.WriteFile("data.json", data, 0644)
-	log.Println(len(seasons))
+	schema, err := os.ReadFile("schema.sql")
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
+
+	_, err = DB.Exec(string(schema))
+	if err != nil {
+		log.Fatalf("Error creating table: %q: %s\n", err, "schema") // Log an error if table creation fails
+	}
+
+	// Single insert
+	stmt, err := DB.Prepare(`
+        INSERT INTO matches (
+            season_year, match_datetime, court,
+            home_team, away_team, home_score, away_score
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer stmt.Close()
+
+	tx, err := DB.Begin()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for x := range *d {
+		season := &(*d)[x]
+		for _, m := range season.MatchDays {
+			for _, r := range m.MatchResults {
+				t := time.Date(m.Date.Year(), m.Date.Month(), m.Date.Day(), r.DateTime.Hour(), r.DateTime.Minute(), r.DateTime.Second(), 0, m.Date.Location())
+				_, err = tx.Stmt(stmt).Exec(
+					m.Date.Year(),
+					t,
+					r.Court,
+					r.HomeTeam,
+					r.AwayTeam,
+					r.HomeScore,
+					r.AwayScore,
+				)
+				if err != nil {
+					tx.Rollback()
+					log.Fatal(err)
+				}
+			}
+		}
+	}
+	tx.Commit()
 }
 
 // fetchAllMatches will fetch all Match-Informations to given SeasonIds
