@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/json"
+	"database/sql"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,6 +13,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/marcelschliesser/werbeliga-hamburg/types"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 type Crawler struct {
@@ -20,13 +21,15 @@ type Crawler struct {
 	baseUrl    string
 }
 
+var DB *sql.DB
+
 func main() {
 
 	c := NewCrawler(os.Getenv("URL"), 10)
 
 	seasons := c.fetchAllSeasons()
 
-	c.fetchAllMatchIds(&seasons)
+	c.fetchAllMatches(&seasons)
 
 	// TODO: parallelize requests
 	for i := range seasons {
@@ -36,17 +39,69 @@ func main() {
 			seasons[i].MatchDays[j].MatchResults = res
 		}
 	}
+	initDB(&seasons)
 
-	data, err := json.Marshal(seasons)
-	if err != nil {
-		log.Panicln(err)
-	}
-	os.WriteFile("data.json", data, 0644)
-	log.Println(len(seasons))
 }
 
-// fetchAllMatchIds will fetch all MatchIds to given SeasonIds
-func (c *Crawler) fetchAllMatchIds(seasons *[]types.Season) {
+func initDB(d *[]types.Season) {
+	var err error
+	DB, err = sql.Open("sqlite3", "./app.db") // Open a connection to the SQLite database file named app.db
+	if err != nil {
+		log.Fatal(err) // Log an error and stop the program if the database can't be opened
+	}
+	schema, err := os.ReadFile("schema.sql")
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
+
+	_, err = DB.Exec(string(schema))
+	if err != nil {
+		log.Fatalf("Error creating table: %q: %s\n", err, "schema") // Log an error if table creation fails
+	}
+
+	// Single insert
+	stmt, err := DB.Prepare(`
+        INSERT INTO matches (
+            season_year, match_datetime, court,
+            home_team, away_team, home_score, away_score
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer stmt.Close()
+
+	tx, err := DB.Begin()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for x := range *d {
+		season := &(*d)[x]
+		for _, m := range season.MatchDays {
+			for _, r := range m.MatchResults {
+				t := time.Date(m.Date.Year(), m.Date.Month(), m.Date.Day(), r.DateTime.Hour(), r.DateTime.Minute(), r.DateTime.Second(), 0, m.Date.Location())
+				_, err = tx.Stmt(stmt).Exec(
+					m.Date.Year(),
+					t,
+					r.Court,
+					r.HomeTeam,
+					r.AwayTeam,
+					r.HomeScore,
+					r.AwayScore,
+				)
+				if err != nil {
+					tx.Rollback()
+					log.Fatal(err)
+				}
+			}
+		}
+	}
+	tx.Commit()
+}
+
+// fetchAllMatches will fetch all Match-Informations to given SeasonIds
+func (c *Crawler) fetchAllMatches(seasons *[]types.Season) {
 
 	for i := range *seasons {
 		season := &(*seasons)[i] // TODO: Understand this "Hack" :-D
@@ -59,6 +114,7 @@ func (c *Crawler) fetchAllMatchIds(seasons *[]types.Season) {
 					log.Fatalln(err.Error())
 				}
 				m.Id = types.MatchId(iduint)
+				m.Date = parseGameDate(s.Text())
 				season.MatchDays = append(season.MatchDays, m)
 			}
 		})
@@ -101,31 +157,6 @@ func NewCrawler(baseUrl string, timeoutSeconds int) *Crawler {
 		},
 		baseUrl: baseUrl,
 	}
-}
-
-func (c *Crawler) ReturnMatchDays(seasonId uint) []types.MatchDay {
-	var matchDays []types.MatchDay
-	doc := c.FetchUrl(seasonId, 1)
-	doc.Find("select[id=match]").Find("option").Each(func(i int, s *goquery.Selection) {
-		m := types.MatchDay{}
-		parseGameDate(&m, s.Text())
-
-		if id, ok := s.Attr("value"); ok {
-			idunit, err := strconv.ParseUint(id, 10, 64)
-			if err != nil {
-				fmt.Printf("Failed to parse: %v\n", err)
-				return
-			}
-			m.Id = types.MatchId(idunit)
-		}
-		matchDayDoc := c.FetchUrl(seasonId, uint(m.Id))
-		m.MatchResults = ReturnMatchResults(matchDayDoc)
-		matchDays = append(matchDays, m)
-
-	})
-
-	return matchDays
-
 }
 
 func ReturnMatchResults(doc *goquery.Document) []types.Match {
@@ -208,20 +239,14 @@ func (c *Crawler) FetchUrl(season, match uint) *goquery.Document {
 	return doc
 }
 
-func parseGameDate(g *types.MatchDay, s string) error {
-	// Extract date part by splitting on "-" and trimming spaces
+func parseGameDate(s string) time.Time {
 	parts := strings.Split(s, "-")
-	if len(parts) != 2 {
-		return fmt.Errorf("invalid date format")
-	}
-
 	datePart := strings.TrimSpace(parts[1])
 	t, err := time.Parse("02.01.2006", datePart)
 	if err != nil {
-		return err
+		log.Println(err.Error())
 	}
-	log.Println(t)
-	return nil
+	return t
 }
 
 func yearFromString(yearString string) uint {
